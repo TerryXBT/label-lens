@@ -24,7 +24,7 @@
 
   const UNIT_PATTERN = /\b\d+(?:\.\d+)?\s?(?:G|GM|KG|ML|L|OZ|LB|PCS|PC|PACK|PK|CT|EA)\b/i;
   const BRAND_PATTERN =
-    /\b(?:FUJIYA|LOTTE|NONGSHIM|OTTOGI|SAMYANG|PALDO|CJ|HAITAI|ORION|CALBEE|MEIJI|GLICO|MORINAGA|KIKKOMAN|LEE\s*KUM\s*KEE|S&B|YAMASA|AJINOMOTO|SAPPORO|KIRIN|POKKA|ITO\s*EN)\b/i;
+    /\b(?:FUJIYA|JULIES|LOTTE|NONGSHIM|OTTOGI|SAMYANG|PALDO|CJ|HAITAI|ORION|CALBEE|MEIJI|GLICO|MORINAGA|KIKKOMAN|LEE\s*KUM\s*KEE|S&B|YAMASA|AJINOMOTO|SAPPORO|KIRIN|POKKA|ITO\s*EN)\b/i;
 
   const OCR_FIXES = [
     { pattern: /\bFUJIYAPARET{1,2}I?E?R?E?\b/gi, replace: "FUJIYA PARETTIERE" },
@@ -38,6 +38,11 @@
     { pattern: /\b([38])06\b/gi, replace: "80G" },
     { pattern: /\b([38])0\s*6\b/gi, replace: "80G" },
     { pattern: /\b30G3\b/gi, replace: "80G" },
+    { pattern: /\b2[\s.]+QO\s+JULIES\s+ECIALS\b/gi, replace: "JULIES" },
+    { pattern: /\bQO\s+JULIES\s+ECIALS\b/gi, replace: "JULIES" },
+    { pattern: /\b2[\s.]+JULIES\b/gi, replace: "JULIES" },
+    { pattern: /\bSHAH\s+BLL\s+CHEESE\b/gi, replace: "SANDWICH CHEESE" },
+    { pattern: /\b1686\b/gi, replace: "168G" },
   ];
 
   function applyOcrFixes(text) {
@@ -183,6 +188,23 @@
     return barcodeStrength(code) > 0;
   }
 
+  function isDetectedBarcode(code) {
+    return /^\d{8,14}$/.test(code);
+  }
+
+  function bestDetectedBarcode(results) {
+    const found = [];
+    for (const result of results || []) {
+      const rawCode = onlyDigits(result?.rawValue || "");
+      const textCode = onlyDigits(result?.text || "");
+      if (isDetectedBarcode(rawCode)) found.push(rawCode);
+      if (isDetectedBarcode(textCode)) found.push(textCode);
+    }
+    const unique = [...new Set(found)];
+    unique.sort((a, b) => barcodeStrength(b) - barcodeStrength(a) || b.length - a.length);
+    return unique[0] || "";
+  }
+
   function extractBarcode(text, detectorValue = "") {
     const found = [];
     const detectorDigits = onlyDigits(detectorValue);
@@ -224,7 +246,7 @@
     let score = letters.length * 2;
     if (UNIT_PATTERN.test(clean)) score += 12;
     if (BRAND_PATTERN.test(clean)) score += 34;
-    if (/\b(?:MILK|CHOCOLATE|NOODLE|RICE|TEA|SAUCE|SNACK|BISCUIT|COOKIE|CANDY|DRINK|JUICE|COFFEE|PLUMS?|MUSCAT|GRAPE|APPLE|MANGO|PEACH|RAMEN|CURRY|SEAWEED)\b/i.test(clean)) {
+    if (/\b(?:MILK|CHOCOLATE|NOODLE|RICE|TEA|SAUCE|SNACK|BISCUIT|COOKIE|CANDY|DRINK|JUICE|COFFEE|CHEESE|SANDWICH|PLUMS?|MUSCAT|GRAPE|APPLE|MANGO|PEACH|RAMEN|CURRY|SEAWEED)\b/i.test(clean)) {
       score += 8;
     }
     if (/^[A-Z0-9 .&'/-]+$/.test(clean)) score += 4;
@@ -425,6 +447,60 @@
       };
       img.src = url;
     });
+  }
+
+  function imageToCanvas(img, maxSide = 2400) {
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  function cropCanvas(source, x, y, width, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+    canvas
+      .getContext("2d")
+      .drawImage(source, x, y, width, height, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  function rotateCanvas(source, rotation) {
+    const normalizedRotation = ((rotation % 360) + 360) % 360;
+    const rotated = document.createElement("canvas");
+    if (normalizedRotation === 90 || normalizedRotation === 270) {
+      rotated.width = source.height;
+      rotated.height = source.width;
+    } else {
+      rotated.width = source.width;
+      rotated.height = source.height;
+    }
+
+    const ctx = rotated.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, rotated.width, rotated.height);
+    ctx.translate(rotated.width / 2, rotated.height / 2);
+    ctx.rotate((normalizedRotation * Math.PI) / 180);
+    ctx.drawImage(source, -source.width / 2, -source.height / 2);
+    return rotated;
+  }
+
+  function barcodeCandidateCanvases(img) {
+    const base = imageToCanvas(img);
+    const label = prepareLabelCanvas(img);
+    const canvases = [base, label];
+
+    for (const source of [base, label]) {
+      const { width, height } = source;
+      canvases.push(cropCanvas(source, 0, height * 0.45, width, height * 0.55));
+      canvases.push(cropCanvas(source, 0, 0, width * 0.5, height));
+      canvases.push(cropCanvas(source, width * 0.5, 0, width * 0.5, height));
+    }
+
+    return canvases.flatMap((canvas) => [canvas, rotateCanvas(canvas, 90), rotateCanvas(canvas, 270)]);
   }
 
   function isYellowPixel(r, g, b) {
@@ -886,10 +962,16 @@
       if (!requested.length) return "";
       const detector = new window.BarcodeDetector({ formats: requested });
       const bitmap = await createImageBitmap(file);
-      const results = await detector.detect(bitmap);
+      const direct = bestDetectedBarcode(await detector.detect(bitmap));
       bitmap.close?.();
-      const detected = results.find((result) => isLikelyBarcode(onlyDigits(result.rawValue)));
-      return detected ? detected.rawValue : "";
+      if (direct) return direct;
+
+      const img = await loadImage(file);
+      for (const canvas of barcodeCandidateCanvases(img)) {
+        const code = bestDetectedBarcode(await detector.detect(canvas));
+        if (code) return code;
+      }
+      return "";
     } catch {
       return "";
     }
@@ -911,12 +993,15 @@
       const detector = new Detector({
         formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
       });
-      const results = await detector.detect(file);
-      const result = results.find((item) => isLikelyBarcode(onlyDigits(item.rawValue)));
-      const code = onlyDigits(result?.text || "");
-      const rawCode = onlyDigits(result?.rawValue || "");
-      if (isLikelyBarcode(rawCode)) return rawCode;
-      return isLikelyBarcode(code) ? code : "";
+      const direct = bestDetectedBarcode(await detector.detect(file));
+      if (direct) return direct;
+
+      const img = await loadImage(file);
+      for (const canvas of barcodeCandidateCanvases(img)) {
+        const code = bestDetectedBarcode(await detector.detect(canvas));
+        if (code) return code;
+      }
+      return "";
     } catch {
       return "";
     }

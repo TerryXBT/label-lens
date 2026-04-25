@@ -26,10 +26,9 @@
           <input class="file-input" id="imageInput" type="file" accept="image/*" />
           <div class="drop-zone" id="dropZone" role="button" tabindex="0">
             <div class="drop-content">
-              <span class="camera-guide" aria-hidden="true"></span>
               <span class="upload-icon" aria-hidden="true">+</span>
               <strong>拍照或选择照片</strong>
-              <span>把标签放进框里，保持文字清晰</span>
+              <span>尽量拍清楚商品名和条形码</span>
             </div>
           </div>
 
@@ -70,21 +69,21 @@
           </div>
 
           <label class="field">
-            <span class="field-title">商品名</span>
-            <textarea id="productName" rows="2" placeholder="识别后自动填写，可手动修改"></textarea>
-          </label>
-          <div class="field-actions">
-            <a class="primary-button disabled" id="productSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索商品名</a>
-            <button class="ghost-button" id="copyProductBtn" type="button" disabled>复制</button>
-          </div>
-
-          <label class="field">
             <span class="field-title">条形码</span>
             <input id="barcode" type="text" inputmode="numeric" placeholder="例如 4903333213559" />
           </label>
           <div class="field-actions">
             <a class="secondary-button disabled" id="barcodeSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索条形码</a>
             <button class="ghost-button" id="copyBarcodeBtn" type="button" disabled>复制</button>
+          </div>
+
+          <label class="field">
+            <span class="field-title">商品名</span>
+            <textarea id="productName" rows="2" placeholder="识别后自动填写，可手动修改"></textarea>
+          </label>
+          <div class="field-actions">
+            <a class="primary-button disabled" id="productSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索商品名</a>
+            <button class="ghost-button" id="copyProductBtn" type="button" disabled>复制</button>
           </div>
 
           <details class="raw-text">

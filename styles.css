@@ -123,7 +123,7 @@ h2 {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 320px;
+  min-height: 160px;
   border: 1px solid #dadade;
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff, #fbfbfd);
@@ -158,10 +158,10 @@ h2 {
 .drop-content {
   display: grid;
   place-items: center;
-  gap: 9px;
+  gap: 8px;
   color: var(--muted);
   text-align: center;
-  padding: 24px;
+  padding: 22px 18px;
 }
 
 .drop-content strong {
@@ -180,24 +180,6 @@ h2 {
   color: var(--accent);
   font-size: 34px;
   line-height: 1;
-}
-
-.camera-guide {
-  width: min(230px, 76vw);
-  aspect-ratio: 1.45;
-  border: 1.5px solid rgba(0, 122, 255, 0.32);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, var(--accent) 16px, transparent 0) left 12px top 12px / 42px 1.5px no-repeat,
-    linear-gradient(var(--accent) 16px, transparent 0) left 12px top 12px / 1.5px 42px no-repeat,
-    linear-gradient(270deg, var(--accent) 16px, transparent 0) right 12px top 12px / 42px 1.5px no-repeat,
-    linear-gradient(var(--accent) 16px, transparent 0) right 12px top 12px / 1.5px 42px no-repeat,
-    linear-gradient(90deg, var(--accent) 16px, transparent 0) left 12px bottom 12px / 42px 1.5px no-repeat,
-    linear-gradient(0deg, var(--accent) 16px, transparent 0) left 12px bottom 12px / 1.5px 42px no-repeat,
-    linear-gradient(270deg, var(--accent) 16px, transparent 0) right 12px bottom 12px / 42px 1.5px no-repeat,
-    linear-gradient(0deg, var(--accent) 16px, transparent 0) right 12px bottom 12px / 1.5px 42px no-repeat,
-    rgba(0, 122, 255, 0.035);
-  opacity: 0.92;
 }
 
 .preview-frame {
@@ -515,7 +497,7 @@ textarea:focus {
 }
 
 .drop-zone {
-  min-height: 176px;
+  min-height: 132px;
 }
 
 .drop-content {
