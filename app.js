@@ -75,6 +75,9 @@
     copyProductBtn: $("#copyProductBtn"),
     copyBarcodeBtn: $("#copyBarcodeBtn"),
     rawText: $("#rawText"),
+    suggestionBanner: $("#suggestionBanner"),
+    suggestNameBtn: $("#suggestNameBtn"),
+    barcodeSearchLink: $("#barcodeSearchLink"),
   };
 
   const STROKE_RADIUS_KEY = "label-stroke-radius-v1";
@@ -87,6 +90,7 @@
   let selectionMode = "";
   let selectionStrokes = [];
   let currentStroke = null;
+  let zxingDetectorPromise = null;
 
   function clampStrokeRadius(value) {
     const num = Number(value);
@@ -335,6 +339,24 @@
 
   function updateCopyButton(button, value) {
     button.disabled = !String(value || "").trim();
+  }
+
+  function productNameNeedsHelp(value) {
+    if (!activeFile) return false;
+    const name = cleanSearchText(value);
+    if (!name) return true;
+
+    const letters = name.match(/\p{L}/gu) || [];
+    const words = name.split(/\s+/).filter(Boolean);
+    if (letters.length < 10) return true;
+    if (BRAND_PATTERN.test(name) && words.length <= 2 && !UNIT_PATTERN.test(name)) return true;
+    if (words.length <= 2 && !UNIT_PATTERN.test(name)) return true;
+    return false;
+  }
+
+  function updateSuggestionBanner() {
+    if (!dom.suggestionBanner) return;
+    dom.suggestionBanner.hidden = !productNameNeedsHelp(dom.productName.value);
   }
 
   async function copyValue(value, button) {
@@ -970,8 +992,10 @@
     const barcode = onlyDigits(dom.barcode.value);
 
     setSearchLink(dom.productSearchLink, productName);
+    setSearchLink(dom.barcodeSearchLink, barcode);
     updateCopyButton(dom.copyProductBtn, productName);
     updateCopyButton(dom.copyBarcodeBtn, barcode);
+    updateSuggestionBanner();
     persistDraft();
   }
 
@@ -979,7 +1003,7 @@
     updateActionState();
   }
 
-  async function detectBarcodeFromImage(file) {
+  async function detectBarcodeWithNativeApi(file) {
     if (!("BarcodeDetector" in window)) return "";
     try {
       const formats = await window.BarcodeDetector.getSupportedFormats();
@@ -998,11 +1022,44 @@
     }
   }
 
+  function loadZxingDetector() {
+    if (!zxingDetectorPromise) {
+      zxingDetectorPromise = import("https://cdn.jsdelivr.net/npm/barcode-detector@3.1.2/dist/es/ponyfill.js")
+        .then((module) => module.BarcodeDetector)
+        .catch(() => null);
+    }
+    return zxingDetectorPromise;
+  }
+
+  async function detectBarcodeWithZxing(file) {
+    try {
+      const Detector = await loadZxingDetector();
+      if (!Detector) return "";
+      const detector = new Detector({
+        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
+      });
+      const results = await detector.detect(file);
+      const result = results.find((item) => isLikelyBarcode(onlyDigits(item.rawValue)));
+      const code = onlyDigits(result?.text || "");
+      const rawCode = onlyDigits(result?.rawValue || "");
+      if (isLikelyBarcode(rawCode)) return rawCode;
+      return isLikelyBarcode(code) ? code : "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function detectBarcodeFromImage(file) {
+    return (await detectBarcodeWithNativeApi(file)) || (await detectBarcodeWithZxing(file));
+  }
+
   async function recognizeText(image, label = "") {
     if (!window.Tesseract) {
       throw new Error("OCR 组件还没有加载完成，请稍后再试。");
     }
     const result = await window.Tesseract.recognize(image, "eng", {
+      tessedit_pageseg_mode: window.Tesseract.PSM?.SPARSE_TEXT || "11",
+      preserve_interword_spaces: "1",
       logger(event) {
         if (event.status === "recognizing text" && typeof event.progress === "number") {
           const percent = Math.round(event.progress * 100);
@@ -1017,7 +1074,7 @@
     const detectorBarcode = await detectBarcodeFromImage(file);
     const img = await loadImage(file);
     const labelCanvas = prepareLabelCanvas(img);
-    const rotations = [0, 90, 270, 180];
+    const rotations = detectorBarcode ? [0, 90] : [0, 90, 270, 180];
     const attempts = [];
 
     for (let index = 0; index < rotations.length; index += 1) {
@@ -1198,6 +1255,8 @@
     dom.copyProductBtn.addEventListener("click", () => copyValue(dom.productName.value, dom.copyProductBtn));
     dom.copyBarcodeBtn.addEventListener("click", () => copyValue(onlyDigits(dom.barcode.value), dom.copyBarcodeBtn));
     dom.productSearchLink.addEventListener("click", persistDraft);
+    dom.barcodeSearchLink.addEventListener("click", persistDraft);
+    dom.suggestNameBtn.addEventListener("click", () => startSelection("product"));
   }
 
   window.LabelRecognizer = {

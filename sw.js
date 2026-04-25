@@ -1,4 +1,4 @@
-const CACHE_NAME = "label-recognizer-v6";
+const CACHE_NAME = "label-recognizer-v7";
 const APP_ASSETS = [
   "./",
   "./index.html",

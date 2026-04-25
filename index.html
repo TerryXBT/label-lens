@@ -79,12 +79,13 @@
           </div>
 
           <label class="field">
-            <span class="field-title">
-              条形码
-              <button class="mini-button" id="copyBarcodeBtn" type="button" disabled>复制</button>
-            </span>
+            <span class="field-title">条形码</span>
             <input id="barcode" type="text" inputmode="numeric" placeholder="例如 4903333213559" />
           </label>
+          <div class="field-actions">
+            <a class="secondary-button disabled" id="barcodeSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索条形码</a>
+            <button class="ghost-button" id="copyBarcodeBtn" type="button" disabled>复制</button>
+          </div>
 
           <details class="raw-text">
             <summary>原始文字</summary>
