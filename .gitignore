@@ -2,5 +2,3 @@ node_modules/
 .vercel/
 .DS_Store
 npm-debug.log*
-package.json
-package-lock.json

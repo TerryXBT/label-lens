@@ -19,16 +19,17 @@
       <section class="workspace" aria-label="商品标签识别工作区">
         <header class="topbar compact">
           <h1>商品标签识别</h1>
-          <p>拍照识别商品名和条形码，必要时圈选局部修正。</p>
+          <p>拍照识别商品名和条形码，必要时涂抹局部修正。</p>
         </header>
 
         <section class="panel upload-panel">
           <div class="drop-zone" id="dropZone">
             <input id="imageInput" type="file" accept="image/*" capture="environment" />
             <div class="drop-content">
+              <span class="camera-guide" aria-hidden="true"></span>
               <span class="upload-icon" aria-hidden="true">+</span>
               <strong>拍照 / 上传标签</strong>
-              <span>自动识别后可圈选修正</span>
+              <span>把黄色或白色标签放进框里</span>
             </div>
           </div>
 
@@ -38,14 +39,22 @@
           </div>
 
           <div class="selection-panel" id="selectionPanel" hidden>
-            <span id="selectionHint">拖动框选要识别的区域</span>
-            <button class="primary-button" id="recognizeSelectionBtn" type="button" disabled>识别选区</button>
+            <span id="selectionHint">用手指涂抹要识别的文字区域</span>
+            <label class="stroke-size-control" for="strokeSizeRange">
+              <span class="stroke-size-label">笔触大小</span>
+              <input type="range" id="strokeSizeRange" min="6" max="30" step="1" value="12" />
+              <span class="stroke-size-value" id="strokeSizeValue">12</span>
+            </label>
+            <div class="selection-actions">
+              <button class="ghost-button" id="clearStrokesBtn" type="button" disabled>清除涂抹</button>
+              <button class="primary-button" id="recognizeSelectionBtn" type="button" disabled>识别涂抹区域</button>
+            </div>
           </div>
 
           <div class="preview-actions" id="previewActions" hidden>
             <button class="secondary-button" id="replaceImageBtn" type="button">更换图片</button>
-            <button class="ghost-button" id="selectNameBtn" type="button">圈选商品名</button>
-            <button class="ghost-button" id="selectBarcodeBtn" type="button">圈选条形码</button>
+            <button class="ghost-button" id="selectNameBtn" type="button">涂抹商品名</button>
+            <button class="ghost-button" id="selectBarcodeBtn" type="button">涂抹条形码</button>
             <button class="ghost-button danger" id="removeImageBtn" type="button">移除</button>
           </div>
         </section>
@@ -54,6 +63,10 @@
           <div class="status-row">
             <span class="status-pill idle" id="statusPill">等待图片</span>
             <span class="progress-text" id="progressText"></span>
+          </div>
+          <div class="suggestion-banner" id="suggestionBanner" hidden>
+            <span>商品名可能不完整，建议涂抹完整商品名再识别。</span>
+            <button class="ghost-button" id="suggestNameBtn" type="button">涂抹商品名</button>
           </div>
 
           <label class="field">

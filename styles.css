@@ -216,6 +216,39 @@ h2 {
   font-weight: 650;
 }
 
+.stroke-size-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.stroke-size-control .stroke-size-label {
+  white-space: nowrap;
+}
+
+.stroke-size-control input[type="range"] {
+  flex: 1;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+.stroke-size-control input[type="range"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.stroke-size-control .stroke-size-value {
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-strong);
+}
+
 .selection-actions {
   display: flex;
   flex-wrap: wrap;

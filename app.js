@@ -1,5 +1,8 @@
 (function () {
   const DRAFT_KEY = "label-product-current-draft-v1";
+  const DRAFT_DB_NAME = "label-draft";
+  const DRAFT_STORE_NAME = "blobs";
+  const DRAFT_BLOB_KEY = "current";
   const PROMO_PATTERNS = [
     /\bSPECIALS?\b/i,
     /\bSAVE\b/i,
@@ -27,6 +30,24 @@
   const BRAND_PATTERN =
     /\b(?:FUJIYA|LOTTE|NONGSHIM|OTTOGI|SAMYANG|PALDO|CJ|HAITAI|ORION|CALBEE|MEIJI|GLICO|MORINAGA|KIKKOMAN|LEE\s*KUM\s*KEE|S&B|YAMASA|AJINOMOTO|SAPPORO|KIRIN|POKKA|ITO\s*EN)\b/i;
 
+  const OCR_FIXES = [
+    { pattern: /\bFUJIYAPARET{1,2}I?E?R?E?\b/gi, replace: "FUJIYA PARETTIERE" },
+    { pattern: /\bFUJIYA\s*PARET{1,2}I?E?R?E?\b/gi, replace: "FUJIYA PARETTIERE" },
+    { pattern: /\bJJIYA\b/gi, replace: "FUJIYA" },
+    { pattern: /\bAMANASHI\b/gi, replace: "YAMANASHI" },
+    { pattern: /\bPARETTIERE\s+I\s+YAMANASHI\b/gi, replace: "PARETTIERE YAMANASHI" },
+    { pattern: /\bGHAN[A4]\b/gi, replace: "GHANA" },
+    { pattern: /\b(MUSCAT|PLUMS)\s+80\b/gi, replace: "$1 80G" },
+    { pattern: /\b([38])0G[35]\b/gi, replace: "80G" },
+    { pattern: /\b([38])06\b/gi, replace: "80G" },
+    { pattern: /\b([38])0\s*6\b/gi, replace: "80G" },
+    { pattern: /\b30G3\b/gi, replace: "80G" },
+  ];
+
+  function applyOcrFixes(text) {
+    return OCR_FIXES.reduce((acc, rule) => acc.replace(rule.pattern, rule.replace), text);
+  }
+
   const $ = (selector) => document.querySelector(selector);
 
   const dom = {
@@ -38,6 +59,9 @@
     selectionPanel: $("#selectionPanel"),
     selectionHint: $("#selectionHint"),
     recognizeSelectionBtn: $("#recognizeSelectionBtn"),
+    clearStrokesBtn: $("#clearStrokesBtn"),
+    strokeSizeRange: $("#strokeSizeRange"),
+    strokeSizeValue: $("#strokeSizeValue"),
     previewActions: $("#previewActions"),
     replaceImageBtn: $("#replaceImageBtn"),
     selectNameBtn: $("#selectNameBtn"),
@@ -54,13 +78,38 @@
     rawText: $("#rawText"),
   };
 
+  const STROKE_RADIUS_KEY = "label-stroke-radius-v1";
+  const STROKE_RADIUS_MIN = 6;
+  const STROKE_RADIUS_MAX = 30;
+  const STROKE_RADIUS_DEFAULT = 12;
+  let strokeRadiusCss = readPersistedStrokeRadius();
   let activeFile = null;
   let latestObjectUrl = "";
-  let draftImageDataUrl = "";
   let selectionMode = "";
-  let selectionStart = null;
-  let selectionRect = null;
-  let isSelecting = false;
+  let selectionStrokes = [];
+  let currentStroke = null;
+
+  function clampStrokeRadius(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return STROKE_RADIUS_DEFAULT;
+    return Math.max(STROKE_RADIUS_MIN, Math.min(STROKE_RADIUS_MAX, Math.round(num)));
+  }
+
+  function readPersistedStrokeRadius() {
+    try {
+      const raw = localStorage.getItem(STROKE_RADIUS_KEY);
+      if (raw == null) return STROKE_RADIUS_DEFAULT;
+      return clampStrokeRadius(raw);
+    } catch {
+      return STROKE_RADIUS_DEFAULT;
+    }
+  }
+
+  function persistStrokeRadius(value) {
+    try {
+      localStorage.setItem(STROKE_RADIUS_KEY, String(value));
+    } catch {}
+  }
 
   function normalizeText(text) {
     return String(text || "")
@@ -81,18 +130,7 @@
   }
 
   function cleanProductLine(line) {
-    return normalizeLine(line)
-      .replace(/\bFUJIYA\s*PARET{1,2}I?E?R?E?\b/gi, "FUJIYA PARETTIERE")
-      .replace(/\bFUJIYAPARET{1,2}I?E?R?E?\b/gi, "FUJIYA PARETTIERE")
-      .replace(/\bJJIYA\b/gi, "FUJIYA")
-      .replace(/\bAMANASHI\b/gi, "YAMANASHI")
-      .replace(/\bPARETTIERE\s+I\s+YAMANASHI\b/gi, "PARETTIERE YAMANASHI")
-      .replace(/\bGHAN[A4]\b/gi, "GHANA")
-      .replace(/\b(MUSCAT|PLUMS)\s+80\b/gi, "$1 80G")
-      .replace(/\b([38])0G[35]\b/gi, "80G")
-      .replace(/\b([38])06\b/gi, "80G")
-      .replace(/\b([38])0\s*6\b/gi, "80G")
-      .replace(/\b30G3\b/gi, "80G")
+    return applyOcrFixes(normalizeLine(line))
       .replace(/[=~_;:]+/g, " ")
       .replace(/\b(?:I{3,}|I?L{3,})\w*\b/gi, " ")
       .replace(/\s+/g, " ")
@@ -113,10 +151,37 @@
     return check === digits[12];
   }
 
+  function isValidEan8(code) {
+    if (!/^\d{8}$/.test(code)) return false;
+    const digits = code.split("").map(Number);
+    const sum = digits
+      .slice(0, 7)
+      .reduce((total, digit, index) => total + digit * (index % 2 === 0 ? 3 : 1), 0);
+    const check = (10 - (sum % 10)) % 10;
+    return check === digits[7];
+  }
+
+  function isValidUpcA(code) {
+    if (!/^\d{12}$/.test(code)) return false;
+    const digits = code.split("").map(Number);
+    const sum = digits
+      .slice(0, 11)
+      .reduce((total, digit, index) => total + digit * (index % 2 === 0 ? 3 : 1), 0);
+    const check = (10 - (sum % 10)) % 10;
+    return check === digits[11];
+  }
+
+  function barcodeStrength(code) {
+    if (code.length === 13 && isValidEan13(code)) return 3;
+    if (code.length === 12 && isValidUpcA(code)) return 3;
+    if (code.length === 8 && isValidEan8(code)) return 3;
+    if (code.length === 14) return 2;
+    return 0;
+  }
+
   function isLikelyBarcode(code) {
-    if (!/^\d{7,14}$/.test(code)) return false;
-    if (code.length === 13) return isValidEan13(code);
-    return [7, 8, 10, 11, 12, 14].includes(code.length);
+    if (!/^\d+$/.test(code)) return false;
+    return barcodeStrength(code) > 0;
   }
 
   function extractBarcode(text, detectorValue = "") {
@@ -127,17 +192,14 @@
     const compactText = normalizeText(text);
     const looseMatches = compactText
       .split("\n")
-      .flatMap((line) => line.match(/\d(?:[ \t.-]?\d){6,15}/g) || []);
+      .flatMap((line) => line.match(/\d(?:[ \t]?\d){6,15}/g) || []);
     for (const match of looseMatches) {
       const digits = onlyDigits(match);
       if (isLikelyBarcode(digits)) found.push(digits);
     }
 
     const unique = [...new Set(found)];
-    unique.sort((a, b) => {
-      const score = (code) => (code.length === 13 && isValidEan13(code) ? 2 : 1);
-      return score(b) - score(a) || b.length - a.length;
-    });
+    unique.sort((a, b) => barcodeStrength(b) - barcodeStrength(a) || b.length - a.length);
     return unique[0] || "";
   }
 
@@ -235,16 +297,7 @@
   }
 
   function cleanSearchText(value) {
-    let text = normalizeLine(value)
-      .replace(/\bFUJIYAPARET{1,2}I?E?R?E?\b/gi, "FUJIYA PARETTIERE")
-      .replace(/\bFUJIYA\s*PARET{1,2}I?E?R?E?\b/gi, "FUJIYA PARETTIERE")
-      .replace(/\bJJIYA\b/gi, "FUJIYA")
-      .replace(/\bAMANASHI\b/gi, "YAMANASHI")
-      .replace(/\bPARETTIERE\s+I\s+YAMANASHI\b/gi, "PARETTIERE YAMANASHI")
-      .replace(/\b(MUSCAT|PLUMS)\s+80\b/gi, "$1 80G")
-      .replace(/\b([38])0G[35]\b/gi, "80G")
-      .replace(/\b([38])06\b/gi, "80G")
-      .replace(/\b30G3\b/gi, "80G")
+    let text = applyOcrFixes(normalizeLine(value))
       .replace(/\b(?:I{3,}|I?L{3,})\w*\b/gi, " ")
       .replace(/\bSUG\b/gi, " ")
       .replace(/[=~_;:.[\]]+/g, " ")
@@ -326,7 +379,7 @@
     let score = letters.length * 2;
     if (parsed.barcode) score += 80;
     if (UNIT_PATTERN.test(name)) score += 18;
-    if (/\b(?:FUJIYA|LOTTE|GHANA|PARETTIERE|MUSCAT|PLUMS?|CHOCOLATE)\b/i.test(name)) score += 16;
+    if (BRAND_PATTERN.test(name)) score += 16;
     if (name.length > 80) score -= name.length - 80;
     if (!name) score -= 30;
     return score;
@@ -357,16 +410,7 @@
     });
   }
 
-  function dataUrlToBlob(dataUrl) {
-    const [meta, data] = dataUrl.split(",");
-    const mime = meta.match(/data:(.*?);/)?.[1] || "image/jpeg";
-    const binary = atob(data);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return new Blob([bytes], { type: mime });
-  }
-
-  async function makeDraftImage(file) {
+  async function makeDraftBlob(file) {
     const img = await loadImage(file);
     const maxSide = 1100;
     const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
@@ -374,7 +418,72 @@
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
     canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.72);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("草稿图片处理失败"))),
+        "image/jpeg",
+        0.72,
+      );
+    });
+  }
+
+  function openDraftDb() {
+    return new Promise((resolve, reject) => {
+      if (!("indexedDB" in window)) {
+        reject(new Error("IndexedDB 不可用"));
+        return;
+      }
+      const request = indexedDB.open(DRAFT_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(DRAFT_STORE_NAME)) {
+          request.result.createObjectStore(DRAFT_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function setDraftBlob(blob) {
+    try {
+      const db = await openDraftDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DRAFT_STORE_NAME, "readwrite");
+        tx.objectStore(DRAFT_STORE_NAME).put(blob, DRAFT_BLOB_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch {}
+  }
+
+  async function getDraftBlob() {
+    try {
+      const db = await openDraftDb();
+      const blob = await new Promise((resolve) => {
+        const tx = db.transaction(DRAFT_STORE_NAME, "readonly");
+        const request = tx.objectStore(DRAFT_STORE_NAME).get(DRAFT_BLOB_KEY);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => resolve(null);
+      });
+      db.close();
+      return blob;
+    } catch {
+      return null;
+    }
+  }
+
+  async function deleteDraftBlob() {
+    try {
+      const db = await openDraftDb();
+      await new Promise((resolve) => {
+        const tx = db.transaction(DRAFT_STORE_NAME, "readwrite");
+        tx.objectStore(DRAFT_STORE_NAME).delete(DRAFT_BLOB_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      });
+      db.close();
+    } catch {}
   }
 
   function persistDraft() {
@@ -382,48 +491,59 @@
       productName: dom.productName.value,
       barcode: dom.barcode.value,
       rawText: dom.rawText.textContent,
-      image: draftImageDataUrl,
-      status: dom.statusPill.textContent,
-      progress: dom.progressText.textContent,
+      hasImage: Boolean(activeFile),
     };
 
-    if (!draft.productName && !draft.barcode && !draft.image) return;
+    if (!draft.productName && !draft.barcode && !draft.hasImage) return;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    } catch {
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, image: "" }));
-      } catch {}
-    }
+    } catch {}
   }
 
-  function restoreDraft() {
+  async function restoreDraft() {
+    let draft;
     try {
-      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-      if (!draft) return;
-      dom.productName.value = draft.productName || "";
-      dom.barcode.value = draft.barcode || "";
-      dom.rawText.textContent = draft.rawText || "";
-      draftImageDataUrl = draft.image || "";
+      draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    } catch {
+      return;
+    }
+    if (!draft) return;
 
-      if (draftImageDataUrl) {
-        activeFile = dataUrlToBlob(draftImageDataUrl);
+    dom.productName.value = draft.productName || "";
+    dom.barcode.value = draft.barcode || "";
+    dom.rawText.textContent = draft.rawText || "";
+
+    if (draft.hasImage) {
+      const blob = await getDraftBlob();
+      if (blob) {
+        activeFile = blob;
         if (latestObjectUrl) URL.revokeObjectURL(latestObjectUrl);
-        latestObjectUrl = URL.createObjectURL(activeFile);
+        latestObjectUrl = URL.createObjectURL(blob);
         dom.preview.src = latestObjectUrl;
         dom.previewFrame.hidden = false;
         dom.previewActions.hidden = false;
         dom.preview.onload = resizeSelectionCanvas;
         if (dom.preview.complete) resizeSelectionCanvas();
       }
+    }
 
-      if (draft.productName || draft.barcode) {
-        setStatus("ready", "已恢复", "保留了上次识别结果");
-      }
-    } catch {}
+    if (draft.productName || draft.barcode) {
+      setStatus("ready", "已恢复", "保留了上次识别结果");
+    }
   }
 
-  function findYellowBounds(canvas) {
+  function isYellowPixel(r, g, b) {
+    return r > 105 && g > 70 && b < 155 && r > b * 1.2 && g > b * 1.08 && r + g > 210;
+  }
+
+  function isWhitePixel(r, g, b) {
+    if (r < 215 || g < 215 || b < 210) return false;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    return max - min < 28;
+  }
+
+  function findLabelBounds(canvas) {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const { width, height } = canvas;
     const data = ctx.getImageData(0, 0, width, height).data;
@@ -440,8 +560,7 @@
         const r = data[index];
         const g = data[index + 1];
         const b = data[index + 2];
-        const yellow = r > 105 && g > 70 && b < 155 && r > b * 1.2 && g > b * 1.08 && r + g > 210;
-        if (yellow) {
+        if (isYellowPixel(r, g, b) || isWhitePixel(r, g, b)) {
           minX = Math.min(minX, x);
           minY = Math.min(minY, y);
           maxX = Math.max(maxX, x);
@@ -541,17 +660,29 @@
     ctx.clearRect(0, 0, width, height);
     if (!selectionMode) return;
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-    ctx.fillRect(0, 0, width, height);
+    const strokes = currentStroke ? [...selectionStrokes, currentStroke] : selectionStrokes;
+    if (!strokes.length) return;
 
-    if (!selectionRect) return;
-    const { x, y, width: rectWidth, height: rectHeight } = selectionRect;
-    ctx.clearRect(x, y, rectWidth, rectHeight);
-    ctx.strokeStyle = "#217a59";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x + 1.5, y + 1.5, Math.max(0, rectWidth - 3), Math.max(0, rectHeight - 3));
-    ctx.fillStyle = "rgba(33, 122, 89, 0.12)";
-    ctx.fillRect(x, y, rectWidth, rectHeight);
+    ctx.lineWidth = strokeRadiusCss * 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(33, 122, 89, 0.32)";
+
+    for (const stroke of strokes) {
+      if (!stroke.length) continue;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x, stroke[0].y);
+      for (let index = 1; index < stroke.length; index += 1) {
+        ctx.lineTo(stroke[index].x, stroke[index].y);
+      }
+      if (stroke.length === 1) {
+        ctx.arc(stroke[0].x, stroke[0].y, strokeRadiusCss, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(33, 122, 89, 0.32)";
+        ctx.fill();
+      } else {
+        ctx.stroke();
+      }
+    }
   }
 
   function pointFromEvent(event) {
@@ -562,39 +693,69 @@
     };
   }
 
-  function normalizeRect(start, end) {
-    const x = Math.min(start.x, end.x);
-    const y = Math.min(start.y, end.y);
-    const width = Math.abs(end.x - start.x);
-    const height = Math.abs(end.y - start.y);
-    return { x, y, width, height };
+  function totalStrokePoints() {
+    let total = currentStroke ? currentStroke.length : 0;
+    for (const stroke of selectionStrokes) total += stroke.length;
+    return total;
+  }
+
+  function hasUsableStroke() {
+    if (totalStrokePoints() < 4) return false;
+    const all = currentStroke ? [...selectionStrokes, currentStroke] : selectionStrokes;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const stroke of all) {
+      for (const point of stroke) {
+        if (point.x < minX) minX = point.x;
+        if (point.y < minY) minY = point.y;
+        if (point.x > maxX) maxX = point.x;
+        if (point.y > maxY) maxY = point.y;
+      }
+    }
+    return maxX - minX >= 18 || maxY - minY >= 14;
+  }
+
+  function syncSelectionButtons() {
+    const hasStrokes = selectionStrokes.length > 0 || Boolean(currentStroke);
+    dom.clearStrokesBtn.disabled = !hasStrokes;
+    dom.recognizeSelectionBtn.disabled = !hasUsableStroke();
+  }
+
+  function clearStrokes() {
+    selectionStrokes = [];
+    currentStroke = null;
+    syncSelectionButtons();
+    drawSelection();
   }
 
   function startSelection(mode) {
     if (!activeFile) return;
     selectionMode = mode;
-    selectionStart = null;
-    selectionRect = null;
-    isSelecting = false;
+    selectionStrokes = [];
+    currentStroke = null;
     dom.selectionPanel.hidden = false;
     dom.selectionCanvas.classList.add("active");
-    dom.recognizeSelectionBtn.disabled = true;
+    syncSelectionButtons();
     dom.selectionHint.textContent =
-      mode === "barcode" ? "在图片上框住条形码下方的数字" : "在图片上框住完整商品名和规格";
+      mode === "barcode"
+        ? "用手指涂抹覆盖条形码下方的数字"
+        : "用手指涂抹覆盖完整商品名和规格";
     resizeSelectionCanvas();
-    setStatus("working", "等待圈选", mode === "barcode" ? "框住条形码数字" : "框住商品名和规格");
+    setStatus("working", "等待涂抹", mode === "barcode" ? "涂抹条形码数字" : "涂抹商品名和规格");
   }
 
   function stopSelection() {
     selectionMode = "";
-    selectionStart = null;
-    selectionRect = null;
-    isSelecting = false;
+    selectionStrokes = [];
+    currentStroke = null;
     dom.selectionPanel.hidden = true;
     dom.selectionCanvas.classList.remove("active");
+    dom.clearStrokesBtn.disabled = true;
     dom.recognizeSelectionBtn.disabled = true;
     drawSelection();
-    if (activeFile) setStatus("ready", "已识别", "可以继续圈选局部修正");
+    if (activeFile) setStatus("ready", "已识别", "可以继续涂抹局部修正");
   }
 
   function imageContentBox() {
@@ -617,37 +778,115 @@
     return { left, top, width, height };
   }
 
-  function selectionToNaturalRect() {
-    if (!selectionRect || !dom.preview.naturalWidth || !dom.preview.naturalHeight) return null;
+  function selectionToNaturalStrokes() {
+    if (!selectionStrokes.length || !dom.preview.naturalWidth || !dom.preview.naturalHeight) return null;
     const box = imageContentBox();
-    const x1 = Math.max(box.left, selectionRect.x);
-    const y1 = Math.max(box.top, selectionRect.y);
-    const x2 = Math.min(box.left + box.width, selectionRect.x + selectionRect.width);
-    const y2 = Math.min(box.top + box.height, selectionRect.y + selectionRect.height);
-    if (x2 - x1 < 12 || y2 - y1 < 12) return null;
+    if (box.width < 1 || box.height < 1) return null;
+
+    const scaleX = dom.preview.naturalWidth / box.width;
+    const scaleY = dom.preview.naturalHeight / box.height;
+    const naturalRadius = strokeRadiusCss * Math.max(scaleX, scaleY);
+
+    const naturalStrokes = [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const stroke of selectionStrokes) {
+      const points = [];
+      for (const point of stroke) {
+        const cx = point.x - box.left;
+        const cy = point.y - box.top;
+        if (cx < 0 || cy < 0 || cx > box.width || cy > box.height) continue;
+        const nx = cx * scaleX;
+        const ny = cy * scaleY;
+        points.push({ x: nx, y: ny });
+        if (nx < minX) minX = nx;
+        if (ny < minY) minY = ny;
+        if (nx > maxX) maxX = nx;
+        if (ny > maxY) maxY = ny;
+      }
+      if (points.length) naturalStrokes.push(points);
+    }
+
+    if (!naturalStrokes.length) return null;
+
+    const pad = naturalRadius * 1.1;
+    const bboxX = Math.max(0, Math.floor(minX - pad));
+    const bboxY = Math.max(0, Math.floor(minY - pad));
+    const bboxRight = Math.min(dom.preview.naturalWidth, Math.ceil(maxX + pad));
+    const bboxBottom = Math.min(dom.preview.naturalHeight, Math.ceil(maxY + pad));
+    const bboxWidth = Math.max(1, bboxRight - bboxX);
+    const bboxHeight = Math.max(1, bboxBottom - bboxY);
+
+    if (bboxWidth < 24 || bboxHeight < 18) return null;
 
     return {
-      x: Math.round(((x1 - box.left) / box.width) * dom.preview.naturalWidth),
-      y: Math.round(((y1 - box.top) / box.height) * dom.preview.naturalHeight),
-      width: Math.round(((x2 - x1) / box.width) * dom.preview.naturalWidth),
-      height: Math.round(((y2 - y1) / box.height) * dom.preview.naturalHeight),
+      strokes: naturalStrokes,
+      bbox: { x: bboxX, y: bboxY, width: bboxWidth, height: bboxHeight },
+      radius: naturalRadius,
     };
   }
 
   async function cropSelectionForOcr() {
-    const crop = selectionToNaturalRect();
-    if (!crop) throw new Error("圈选区域太小，请重新框选");
+    const data = selectionToNaturalStrokes();
+    if (!data) throw new Error("涂抹区域太小，请重新涂抹覆盖文字");
+    const { strokes, bbox, radius } = data;
+
     const img = await loadImage(activeFile);
-    const scale = Math.min(3, Math.max(1, 1400 / Math.max(crop.width, crop.height)));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(crop.width * scale));
-    canvas.height = Math.max(1, Math.round(crop.height * scale));
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-    enhanceForOcr(canvas);
-    return canvasToBlob(canvas);
+    const scale = Math.min(3, Math.max(1, 1400 / Math.max(bbox.width, bbox.height)));
+    const cropped = document.createElement("canvas");
+    cropped.width = Math.max(1, Math.round(bbox.width * scale));
+    cropped.height = Math.max(1, Math.round(bbox.height * scale));
+    const cctx = cropped.getContext("2d");
+    cctx.drawImage(img, bbox.x, bbox.y, bbox.width, bbox.height, 0, 0, cropped.width, cropped.height);
+
+    const mask = document.createElement("canvas");
+    mask.width = cropped.width;
+    mask.height = cropped.height;
+    const mctx = mask.getContext("2d");
+    mctx.lineWidth = radius * 2 * scale;
+    mctx.lineCap = "round";
+    mctx.lineJoin = "round";
+    mctx.strokeStyle = "#fff";
+    mctx.fillStyle = "#fff";
+    for (const stroke of strokes) {
+      if (!stroke.length) continue;
+      mctx.beginPath();
+      mctx.moveTo((stroke[0].x - bbox.x) * scale, (stroke[0].y - bbox.y) * scale);
+      for (let index = 1; index < stroke.length; index += 1) {
+        mctx.lineTo((stroke[index].x - bbox.x) * scale, (stroke[index].y - bbox.y) * scale);
+      }
+      if (stroke.length === 1) {
+        mctx.beginPath();
+        mctx.arc(
+          (stroke[0].x - bbox.x) * scale,
+          (stroke[0].y - bbox.y) * scale,
+          radius * scale,
+          0,
+          Math.PI * 2,
+        );
+        mctx.fill();
+      } else {
+        mctx.stroke();
+      }
+    }
+
+    cctx.globalCompositeOperation = "destination-in";
+    cctx.drawImage(mask, 0, 0);
+    cctx.globalCompositeOperation = "source-over";
+
+    const finalCanvas = document.createElement("canvas");
+    finalCanvas.width = cropped.width;
+    finalCanvas.height = cropped.height;
+    const fctx = finalCanvas.getContext("2d");
+    fctx.fillStyle = "#fff";
+    fctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+    fctx.drawImage(cropped, 0, 0);
+
+    enhanceForOcr(finalCanvas);
+    return canvasToBlob(finalCanvas);
   }
 
   async function recognizeSelection() {
@@ -677,34 +916,35 @@
       stopSelection();
       setStatus("ready", "选区已识别", "可以搜索或继续修改");
     } catch (error) {
-      setStatus("error", "选区识别失败", error.message || "请重新框选更清晰的区域");
+      setStatus("error", "选区识别失败", error.message || "请重新涂抹覆盖更清晰的区域");
     }
   }
 
-  async function makeOcrImage(file, rotation) {
-    const img = await loadImage(file);
+  function prepareLabelCanvas(img) {
     const maxSide = 1800;
     const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
     const source = document.createElement("canvas");
     source.width = Math.max(1, Math.round(img.naturalWidth * scale));
     source.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const sourceCtx = source.getContext("2d");
-    sourceCtx.drawImage(img, 0, 0, source.width, source.height);
+    source.getContext("2d").drawImage(img, 0, 0, source.width, source.height);
 
-    const crop = findYellowBounds(source);
+    const crop = findLabelBounds(source);
     const cropped = document.createElement("canvas");
     cropped.width = crop.width;
     cropped.height = crop.height;
     cropped.getContext("2d").drawImage(source, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    return cropped;
+  }
 
+  async function rotateAndEnhanceForOcr(croppedCanvas, rotation) {
     const normalizedRotation = ((rotation % 360) + 360) % 360;
     const rotated = document.createElement("canvas");
     if (normalizedRotation === 90 || normalizedRotation === 270) {
-      rotated.width = cropped.height;
-      rotated.height = cropped.width;
+      rotated.width = croppedCanvas.height;
+      rotated.height = croppedCanvas.width;
     } else {
-      rotated.width = cropped.width;
-      rotated.height = cropped.height;
+      rotated.width = croppedCanvas.width;
+      rotated.height = croppedCanvas.height;
     }
 
     const rotatedCtx = rotated.getContext("2d");
@@ -712,7 +952,7 @@
     rotatedCtx.fillRect(0, 0, rotated.width, rotated.height);
     rotatedCtx.translate(rotated.width / 2, rotated.height / 2);
     rotatedCtx.rotate((normalizedRotation * Math.PI) / 180);
-    rotatedCtx.drawImage(cropped, -cropped.width / 2, -cropped.height / 2);
+    rotatedCtx.drawImage(croppedCanvas, -croppedCanvas.width / 2, -croppedCanvas.height / 2);
 
     enhanceForOcr(rotated);
     const blob = await canvasToBlob(rotated);
@@ -777,13 +1017,15 @@
 
   async function recognizeBest(file) {
     const detectorBarcode = await detectBarcodeFromImage(file);
+    const img = await loadImage(file);
+    const labelCanvas = prepareLabelCanvas(img);
     const rotations = [0, 90, 270, 180];
     const attempts = [];
 
     for (let index = 0; index < rotations.length; index += 1) {
       const rotation = rotations[index];
       setStatus("working", "正在优化图片", `方向 ${index + 1}/${rotations.length}`);
-      const image = await makeOcrImage(file, rotation);
+      const image = await rotateAndEnhanceForOcr(labelCanvas, rotation);
       const text = await recognizeText(image, `方向 ${index + 1}/${rotations.length} · `);
       const parsed = parseLabelText(text, detectorBarcode);
       const score = scoreParsedResult(parsed);
@@ -808,11 +1050,10 @@
 
     if (latestObjectUrl) URL.revokeObjectURL(latestObjectUrl);
     latestObjectUrl = URL.createObjectURL(file);
-    draftImageDataUrl = "";
-    makeDraftImage(file)
-      .then((dataUrl) => {
+    makeDraftBlob(file)
+      .then(async (blob) => {
         if (activeFile === file) {
-          draftImageDataUrl = dataUrl;
+          await setDraftBlob(blob);
           persistDraft();
         }
       })
@@ -852,7 +1093,6 @@
       URL.revokeObjectURL(latestObjectUrl);
       latestObjectUrl = "";
     }
-    draftImageDataUrl = "";
     dom.preview.removeAttribute("src");
     dom.previewFrame.hidden = true;
     dom.previewActions.hidden = true;
@@ -861,6 +1101,7 @@
     dom.barcode.value = "";
     dom.rawText.textContent = "";
     localStorage.removeItem(DRAFT_KEY);
+    deleteDraftBlob();
     setStatus("idle", "等待图片", "");
     updateActionState();
   }
@@ -882,33 +1123,57 @@
     dom.selectNameBtn.addEventListener("click", () => startSelection("product"));
     dom.selectBarcodeBtn.addEventListener("click", () => startSelection("barcode"));
     dom.recognizeSelectionBtn.addEventListener("click", recognizeSelection);
+    dom.clearStrokesBtn.addEventListener("click", clearStrokes);
+
+    dom.strokeSizeRange.min = String(STROKE_RADIUS_MIN);
+    dom.strokeSizeRange.max = String(STROKE_RADIUS_MAX);
+    dom.strokeSizeRange.value = String(strokeRadiusCss);
+    dom.strokeSizeValue.textContent = String(strokeRadiusCss);
+    dom.strokeSizeRange.addEventListener("input", (event) => {
+      strokeRadiusCss = clampStrokeRadius(event.target.value);
+      dom.strokeSizeValue.textContent = String(strokeRadiusCss);
+      persistStrokeRadius(strokeRadiusCss);
+      drawSelection();
+    });
+
+    function endStroke() {
+      if (!currentStroke) return;
+      if (currentStroke.length) selectionStrokes.push(currentStroke);
+      currentStroke = null;
+      syncSelectionButtons();
+      drawSelection();
+    }
 
     dom.selectionCanvas.addEventListener("pointerdown", (event) => {
       if (!selectionMode) return;
       event.preventDefault();
       dom.selectionCanvas.setPointerCapture(event.pointerId);
-      selectionStart = pointFromEvent(event);
-      selectionRect = { x: selectionStart.x, y: selectionStart.y, width: 0, height: 0 };
-      isSelecting = true;
-      dom.recognizeSelectionBtn.disabled = true;
+      currentStroke = [pointFromEvent(event)];
+      syncSelectionButtons();
       drawSelection();
     });
 
     dom.selectionCanvas.addEventListener("pointermove", (event) => {
-      if (!selectionMode || !isSelecting || !selectionStart) return;
+      if (!selectionMode || !currentStroke) return;
       event.preventDefault();
-      selectionRect = normalizeRect(selectionStart, pointFromEvent(event));
-      dom.recognizeSelectionBtn.disabled = selectionRect.width < 24 || selectionRect.height < 16;
-      drawSelection();
+      const point = pointFromEvent(event);
+      const last = currentStroke[currentStroke.length - 1];
+      if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 2) {
+        currentStroke.push(point);
+        syncSelectionButtons();
+        drawSelection();
+      }
     });
 
     dom.selectionCanvas.addEventListener("pointerup", (event) => {
-      if (!selectionMode || !isSelecting || !selectionStart) return;
+      if (!selectionMode || !currentStroke) return;
       event.preventDefault();
-      selectionRect = normalizeRect(selectionStart, pointFromEvent(event));
-      isSelecting = false;
-      dom.recognizeSelectionBtn.disabled = selectionRect.width < 24 || selectionRect.height < 16;
-      drawSelection();
+      endStroke();
+    });
+
+    dom.selectionCanvas.addEventListener("pointercancel", () => {
+      if (!selectionMode || !currentStroke) return;
+      endStroke();
     });
 
     dom.removeImageBtn.addEventListener("click", clearCurrentImage);
