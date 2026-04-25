@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#217a59" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="标签识别" />
+    <title>商品标签识别</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-label="商品标签识别工作区">
+        <header class="topbar compact">
+          <h1>商品标签识别</h1>
+          <p>拍照识别商品名和条形码，必要时圈选局部修正。</p>
+        </header>
+
+        <section class="panel upload-panel">
+          <div class="drop-zone" id="dropZone">
+            <input id="imageInput" type="file" accept="image/*" capture="environment" />
+            <div class="drop-content">
+              <span class="upload-icon" aria-hidden="true">+</span>
+              <strong>拍照 / 上传标签</strong>
+              <span>自动识别后可圈选修正</span>
+            </div>
+          </div>
+
+          <div class="preview-frame" id="previewFrame" hidden>
+            <img class="preview" id="preview" alt="上传的标签预览" />
+            <canvas class="selection-canvas" id="selectionCanvas"></canvas>
+          </div>
+
+          <div class="selection-panel" id="selectionPanel" hidden>
+            <span id="selectionHint">拖动框选要识别的区域</span>
+            <button class="primary-button" id="recognizeSelectionBtn" type="button" disabled>识别选区</button>
+          </div>
+
+          <div class="preview-actions" id="previewActions" hidden>
+            <button class="secondary-button" id="replaceImageBtn" type="button">更换图片</button>
+            <button class="ghost-button" id="selectNameBtn" type="button">圈选商品名</button>
+            <button class="ghost-button" id="selectBarcodeBtn" type="button">圈选条形码</button>
+            <button class="ghost-button danger" id="removeImageBtn" type="button">移除</button>
+          </div>
+        </section>
+
+        <section class="panel result-panel">
+          <div class="status-row">
+            <span class="status-pill idle" id="statusPill">等待图片</span>
+            <span class="progress-text" id="progressText"></span>
+          </div>
+
+          <label class="field">
+            <span class="field-title">商品名</span>
+            <textarea id="productName" rows="2" placeholder="识别后自动填写，可手动修改"></textarea>
+          </label>
+          <div class="field-actions">
+            <a class="primary-button disabled" id="productSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索商品名</a>
+            <button class="ghost-button" id="copyProductBtn" type="button" disabled>复制</button>
+          </div>
+
+          <label class="field">
+            <span class="field-title">条形码</span>
+            <input id="barcode" type="text" inputmode="numeric" placeholder="例如 4903333213559" />
+          </label>
+          <div class="field-actions">
+            <a class="secondary-button disabled" id="barcodeSearchLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">搜索条形码</a>
+            <button class="ghost-button" id="copyBarcodeBtn" type="button" disabled>复制</button>
+          </div>
+
+          <details class="raw-text">
+            <summary>原始文字</summary>
+            <pre id="rawText"></pre>
+          </details>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

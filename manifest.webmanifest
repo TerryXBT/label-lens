@@ -1,0 +1,19 @@
+{
+  "name": "商品标签识别",
+  "short_name": "标签识别",
+  "description": "拍照识别价格标签里的商品名和条形码，并快速打开图片搜索。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7f4",
+  "theme_color": "#217a59",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
