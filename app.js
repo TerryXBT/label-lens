@@ -58,6 +58,7 @@
     selectionCanvas: $("#selectionCanvas"),
     selectionPanel: $("#selectionPanel"),
     selectionHint: $("#selectionHint"),
+    cancelSelectionBtn: $("#cancelSelectionBtn"),
     recognizeSelectionBtn: $("#recognizeSelectionBtn"),
     clearStrokesBtn: $("#clearStrokesBtn"),
     strokeSizeRange: $("#strokeSizeRange"),
@@ -65,14 +66,12 @@
     previewActions: $("#previewActions"),
     replaceImageBtn: $("#replaceImageBtn"),
     selectNameBtn: $("#selectNameBtn"),
-    selectBarcodeBtn: $("#selectBarcodeBtn"),
     removeImageBtn: $("#removeImageBtn"),
     statusPill: $("#statusPill"),
     progressText: $("#progressText"),
     productName: $("#productName"),
     barcode: $("#barcode"),
     productSearchLink: $("#productSearchLink"),
-    barcodeSearchLink: $("#barcodeSearchLink"),
     copyProductBtn: $("#copyProductBtn"),
     copyBarcodeBtn: $("#copyBarcodeBtn"),
     rawText: $("#rawText"),
@@ -971,7 +970,6 @@
     const barcode = onlyDigits(dom.barcode.value);
 
     setSearchLink(dom.productSearchLink, productName);
-    setSearchLink(dom.barcodeSearchLink, barcode);
     updateCopyButton(dom.copyProductBtn, productName);
     updateCopyButton(dom.copyBarcodeBtn, barcode);
     persistDraft();
@@ -1120,8 +1118,8 @@
       dom.imageInput.click();
     });
 
+    dom.cancelSelectionBtn.addEventListener("click", stopSelection);
     dom.selectNameBtn.addEventListener("click", () => startSelection("product"));
-    dom.selectBarcodeBtn.addEventListener("click", () => startSelection("barcode"));
     dom.recognizeSelectionBtn.addEventListener("click", recognizeSelection);
     dom.clearStrokesBtn.addEventListener("click", clearStrokes);
 
@@ -1200,7 +1198,6 @@
     dom.copyProductBtn.addEventListener("click", () => copyValue(dom.productName.value, dom.copyProductBtn));
     dom.copyBarcodeBtn.addEventListener("click", () => copyValue(onlyDigits(dom.barcode.value), dom.copyBarcodeBtn));
     dom.productSearchLink.addEventListener("click", persistDraft);
-    dom.barcodeSearchLink.addEventListener("click", persistDraft);
   }
 
   window.LabelRecognizer = {
