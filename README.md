@@ -15,3 +15,7 @@ LabelLens is a mobile-first PWA for recognizing supermarket price labels. It ext
 ## Usage
 
 Open `index.html` in a browser or deploy the folder as a static site.
+
+## Checks
+
+Run `npm test` before publishing changes.

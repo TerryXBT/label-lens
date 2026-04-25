@@ -3,6 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://tessdata.projectnaptha.com blob: data:"
+    />
     <meta name="theme-color" content="#f5f5f7" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="标签识别" />
@@ -11,7 +15,12 @@
     <link rel="icon" href="./icon.svg" />
     <link rel="apple-touch-icon" href="./icon.svg" />
     <link rel="stylesheet" href="./styles.css" />
-    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"
+      integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F"
+      crossorigin="anonymous"
+    ></script>
     <script defer src="./app.js"></script>
   </head>
   <body>

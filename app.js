@@ -92,6 +92,7 @@
   let selectionStrokes = [];
   let currentStroke = null;
   let zxingDetectorPromise = null;
+  let recognitionRequestId = 0;
 
   function clampStrokeRadius(value) {
     const num = Number(value);
@@ -286,7 +287,8 @@
       if (block.length) return cleanSearchText(block.join(" "));
     }
 
-    let bestBlock = [];
+    let bestStart = -1;
+    let bestEnd = -1;
     let bestScore = -Infinity;
     for (let start = 0; start < scored.length; start += 1) {
       let blockScore = 0;
@@ -300,11 +302,13 @@
         if (joined.length > 72) blockScore -= joined.length - 72;
         if (blockScore > bestScore) {
           bestScore = blockScore;
-          bestBlock = [...block];
+          bestStart = start;
+          bestEnd = end;
         }
       }
     }
 
+    let bestBlock = bestStart >= 0 ? scored.slice(bestStart, bestEnd + 1).map((item) => item.line) : [];
     if (!bestBlock.length) {
       bestBlock = scored
         .filter((item) => item.score > 0)
@@ -333,12 +337,6 @@
 
     text = text.replace(/\s+([.,])/g, "$1");
     return text.toUpperCase();
-  }
-
-  function buildSearchQuery(productName, barcode) {
-    const name = cleanSearchText(productName);
-    const code = onlyDigits(barcode);
-    return name || code;
   }
 
   function googleImagesUrl(query) {
@@ -407,7 +405,6 @@
     return {
       productName,
       barcode,
-      searchQuery: buildSearchQuery(productName, barcode),
       rawText: normalizeText(text),
     };
   }
@@ -488,19 +485,28 @@
     return rotated;
   }
 
-  function barcodeCandidateCanvases(img) {
+  function* barcodeCandidateCanvases(img) {
     const base = imageToCanvas(img);
     const label = prepareLabelCanvas(img);
-    const canvases = [base, label];
+    const sources = [base, label];
 
-    for (const source of [base, label]) {
+    for (const source of sources) {
+      yield source;
+      yield rotateCanvas(source, 90);
+      yield rotateCanvas(source, 270);
+
       const { width, height } = source;
-      canvases.push(cropCanvas(source, 0, height * 0.45, width, height * 0.55));
-      canvases.push(cropCanvas(source, 0, 0, width * 0.5, height));
-      canvases.push(cropCanvas(source, width * 0.5, 0, width * 0.5, height));
+      const crops = [
+        cropCanvas(source, 0, height * 0.45, width, height * 0.55),
+        cropCanvas(source, 0, 0, width * 0.5, height),
+        cropCanvas(source, width * 0.5, 0, width * 0.5, height),
+      ];
+      for (const crop of crops) {
+        yield crop;
+        yield rotateCanvas(crop, 90);
+        yield rotateCanvas(crop, 270);
+      }
     }
-
-    return canvases.flatMap((canvas) => [canvas, rotateCanvas(canvas, 90), rotateCanvas(canvas, 270)]);
   }
 
   function isYellowPixel(r, g, b) {
@@ -591,10 +597,10 @@
   function enhanceForOcr(canvas) {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const grayValues = [];
-    for (let i = 0; i < image.data.length; i += 4) {
+    const grayValues = new Uint8ClampedArray(image.data.length / 4);
+    for (let i = 0, j = 0; i < image.data.length; i += 4, j += 1) {
       const gray = Math.round(image.data[i] * 0.299 + image.data[i + 1] * 0.587 + image.data[i + 2] * 0.114);
-      grayValues.push(gray);
+      grayValues[j] = gray;
     }
 
     const threshold = otsuThreshold(grayValues);
@@ -726,7 +732,12 @@
     dom.clearStrokesBtn.disabled = true;
     dom.recognizeSelectionBtn.disabled = true;
     drawSelection();
-    if (activeFile) setStatus("ready", "已识别", "可以继续涂抹局部修正");
+    if (!activeFile) return;
+    if (dom.productName.value || dom.barcode.value) {
+      setStatus("ready", "已识别", "可以继续涂抹局部修正");
+    } else {
+      setStatus("idle", "等待操作", "可以更换图片或重新涂抹");
+    }
   }
 
   function imageContentBox() {
@@ -867,10 +878,10 @@
       setStatus("working", "正在识别选区", mode === "barcode" ? "读取条形码数字" : "读取商品名");
       const image = await cropSelectionForOcr();
       const text = await recognizeText(image, "选区 · ");
-      const parsed = parseLabelText(text);
+      const detectedCode = mode === "barcode" ? await detectBarcodeFromImage(image) : "";
+      const parsed = parseLabelText(text, detectedCode);
 
       if (mode === "barcode") {
-        const detectedCode = await detectBarcodeFromImage(image);
         const code = detectedCode || parsed.barcode || extractBarcode(text);
         if (code) {
           dom.barcode.value = code;
@@ -908,26 +919,10 @@
   }
 
   async function rotateAndEnhanceForOcr(croppedCanvas, rotation) {
-    const normalizedRotation = ((rotation % 360) + 360) % 360;
-    const rotated = document.createElement("canvas");
-    if (normalizedRotation === 90 || normalizedRotation === 270) {
-      rotated.width = croppedCanvas.height;
-      rotated.height = croppedCanvas.width;
-    } else {
-      rotated.width = croppedCanvas.width;
-      rotated.height = croppedCanvas.height;
-    }
-
-    const rotatedCtx = rotated.getContext("2d");
-    rotatedCtx.fillStyle = "#fff";
-    rotatedCtx.fillRect(0, 0, rotated.width, rotated.height);
-    rotatedCtx.translate(rotated.width / 2, rotated.height / 2);
-    rotatedCtx.rotate((normalizedRotation * Math.PI) / 180);
-    rotatedCtx.drawImage(croppedCanvas, -croppedCanvas.width / 2, -croppedCanvas.height / 2);
-
+    const rotated = rotateCanvas(croppedCanvas, rotation);
     enhanceForOcr(rotated);
     const blob = await canvasToBlob(rotated);
-    blob.rotation = normalizedRotation;
+    blob.rotation = ((rotation % 360) + 360) % 360;
     return blob;
   }
 
@@ -946,10 +941,6 @@
     updateCopyButton(dom.copyProductBtn, productName);
     updateCopyButton(dom.copyBarcodeBtn, barcode);
     updateSuggestionBanner();
-  }
-
-  function refreshSearchQuery() {
-    updateActionState();
   }
 
   async function detectBarcodeWithNativeApi(file) {
@@ -979,8 +970,18 @@
 
   function loadZxingDetector() {
     if (!zxingDetectorPromise) {
-      zxingDetectorPromise = import("https://cdn.jsdelivr.net/npm/barcode-detector@3.1.2/dist/es/ponyfill.js")
-        .then((module) => module.BarcodeDetector)
+      zxingDetectorPromise = import("./vendor/barcode-detector/ponyfill.js")
+        .then((module) => {
+          module.setZXingModuleOverrides?.({
+            locateFile(fileName, prefix) {
+              if (fileName === "zxing_reader.wasm") {
+                return new URL("./vendor/barcode-detector/zxing_reader.wasm", window.location.href).href;
+              }
+              return `${prefix}${fileName}`;
+            },
+          });
+          return module.BarcodeDetector;
+        })
         .catch(() => null);
     }
     return zxingDetectorPromise;
@@ -1032,6 +1033,7 @@
     const detectorBarcode = await detectBarcodeFromImage(file);
     const img = await loadImage(file);
     const labelCanvas = prepareLabelCanvas(img);
+    // Once a barcode is found, OCR only needs enough direction checks to read the product text.
     const rotations = detectorBarcode ? [0, 90] : [0, 90, 270, 180];
     const attempts = [];
 
@@ -1059,6 +1061,7 @@
 
   async function handleFile(file) {
     if (!file || !file.type.startsWith("image/")) return;
+    const requestId = (recognitionRequestId += 1);
     activeFile = file;
 
     if (latestObjectUrl) URL.revokeObjectURL(latestObjectUrl);
@@ -1075,6 +1078,7 @@
 
     try {
       const parsed = await recognizeBest(file);
+      if (requestId !== recognitionRequestId || activeFile !== file) return;
 
       dom.productName.value = parsed.productName;
       dom.barcode.value = parsed.barcode;
@@ -1086,13 +1090,15 @@
         setStatus("error", "需要修改", "没有提取到可用商品名或条形码");
       }
     } catch (error) {
+      if (requestId !== recognitionRequestId || activeFile !== file) return;
       setStatus("error", "识别失败", error.message || "请换一张更清晰的图片再试");
     } finally {
-      updateActionState();
+      if (requestId === recognitionRequestId && activeFile === file) updateActionState();
     }
   }
 
   function clearCurrentImage() {
+    recognitionRequestId += 1;
     activeFile = null;
     dom.imageInput.value = "";
     if (latestObjectUrl) {
@@ -1210,8 +1216,8 @@
       handleFile(event.dataTransfer.files?.[0]);
     });
 
-    dom.productName.addEventListener("input", refreshSearchQuery);
-    dom.barcode.addEventListener("input", refreshSearchQuery);
+    dom.productName.addEventListener("input", updateActionState);
+    dom.barcode.addEventListener("input", updateActionState);
     dom.copyProductBtn.addEventListener("click", () => copyValue(dom.productName.value, dom.copyProductBtn));
     dom.copyBarcodeBtn.addEventListener("click", () => copyValue(onlyDigits(dom.barcode.value), dom.copyBarcodeBtn));
     dom.suggestNameBtn.addEventListener("click", () => startSelection("product"));
@@ -1222,7 +1228,6 @@
     cleanSearchText,
     extractBarcode,
     extractProductName,
-    buildSearchQuery,
     scoreParsedResult,
   };
 
