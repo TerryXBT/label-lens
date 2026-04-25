@@ -1,8 +1,4 @@
 (function () {
-  const DRAFT_KEY = "label-product-current-draft-v1";
-  const DRAFT_DB_NAME = "label-draft";
-  const DRAFT_STORE_NAME = "blobs";
-  const DRAFT_BLOB_KEY = "current";
   const PROMO_PATTERNS = [
     /\bSPECIALS?\b/i,
     /\bSAVE\b/i,
@@ -429,128 +425,6 @@
       };
       img.src = url;
     });
-  }
-
-  async function makeDraftBlob(file) {
-    const img = await loadImage(file);
-    const maxSide = 1100;
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error("草稿图片处理失败"))),
-        "image/jpeg",
-        0.72,
-      );
-    });
-  }
-
-  function openDraftDb() {
-    return new Promise((resolve, reject) => {
-      if (!("indexedDB" in window)) {
-        reject(new Error("IndexedDB 不可用"));
-        return;
-      }
-      const request = indexedDB.open(DRAFT_DB_NAME, 1);
-      request.onupgradeneeded = () => {
-        if (!request.result.objectStoreNames.contains(DRAFT_STORE_NAME)) {
-          request.result.createObjectStore(DRAFT_STORE_NAME);
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async function setDraftBlob(blob) {
-    try {
-      const db = await openDraftDb();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(DRAFT_STORE_NAME, "readwrite");
-        tx.objectStore(DRAFT_STORE_NAME).put(blob, DRAFT_BLOB_KEY);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      db.close();
-    } catch {}
-  }
-
-  async function getDraftBlob() {
-    try {
-      const db = await openDraftDb();
-      const blob = await new Promise((resolve) => {
-        const tx = db.transaction(DRAFT_STORE_NAME, "readonly");
-        const request = tx.objectStore(DRAFT_STORE_NAME).get(DRAFT_BLOB_KEY);
-        request.onsuccess = () => resolve(request.result || null);
-        request.onerror = () => resolve(null);
-      });
-      db.close();
-      return blob;
-    } catch {
-      return null;
-    }
-  }
-
-  async function deleteDraftBlob() {
-    try {
-      const db = await openDraftDb();
-      await new Promise((resolve) => {
-        const tx = db.transaction(DRAFT_STORE_NAME, "readwrite");
-        tx.objectStore(DRAFT_STORE_NAME).delete(DRAFT_BLOB_KEY);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-      });
-      db.close();
-    } catch {}
-  }
-
-  function persistDraft() {
-    const draft = {
-      productName: dom.productName.value,
-      barcode: dom.barcode.value,
-      rawText: dom.rawText.textContent,
-      hasImage: Boolean(activeFile),
-    };
-
-    if (!draft.productName && !draft.barcode && !draft.hasImage) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    } catch {}
-  }
-
-  async function restoreDraft() {
-    let draft;
-    try {
-      draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-    } catch {
-      return;
-    }
-    if (!draft) return;
-
-    dom.productName.value = draft.productName || "";
-    dom.barcode.value = draft.barcode || "";
-    dom.rawText.textContent = draft.rawText || "";
-
-    if (draft.hasImage) {
-      const blob = await getDraftBlob();
-      if (blob) {
-        activeFile = blob;
-        if (latestObjectUrl) URL.revokeObjectURL(latestObjectUrl);
-        latestObjectUrl = URL.createObjectURL(blob);
-        dom.preview.src = latestObjectUrl;
-        dom.previewFrame.hidden = false;
-        dom.previewActions.hidden = false;
-        dom.preview.onload = resizeSelectionCanvas;
-        if (dom.preview.complete) resizeSelectionCanvas();
-      }
-    }
-
-    if (draft.productName || draft.barcode) {
-      setStatus("ready", "已恢复", "保留了上次识别结果");
-    }
   }
 
   function isYellowPixel(r, g, b) {
@@ -996,7 +870,6 @@
     updateCopyButton(dom.copyProductBtn, productName);
     updateCopyButton(dom.copyBarcodeBtn, barcode);
     updateSuggestionBanner();
-    persistDraft();
   }
 
   function refreshSearchQuery() {
@@ -1105,14 +978,7 @@
 
     if (latestObjectUrl) URL.revokeObjectURL(latestObjectUrl);
     latestObjectUrl = URL.createObjectURL(file);
-    makeDraftBlob(file)
-      .then(async (blob) => {
-        if (activeFile === file) {
-          await setDraftBlob(blob);
-          persistDraft();
-        }
-      })
-      .catch(() => {});
+    dom.dropZone.hidden = true;
     dom.preview.src = latestObjectUrl;
     dom.previewFrame.hidden = false;
     dom.previewActions.hidden = false;
@@ -1149,14 +1015,13 @@
       latestObjectUrl = "";
     }
     dom.preview.removeAttribute("src");
+    dom.dropZone.hidden = false;
     dom.previewFrame.hidden = true;
     dom.previewActions.hidden = true;
     stopSelection();
     dom.productName.value = "";
     dom.barcode.value = "";
     dom.rawText.textContent = "";
-    localStorage.removeItem(DRAFT_KEY);
-    deleteDraftBlob();
     setStatus("idle", "等待图片", "");
     updateActionState();
   }
@@ -1168,6 +1033,16 @@
 
     dom.imageInput.addEventListener("click", () => {
       dom.imageInput.value = "";
+    });
+
+    dom.dropZone.addEventListener("click", () => {
+      dom.imageInput.click();
+    });
+
+    dom.dropZone.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      dom.imageInput.click();
     });
 
     dom.replaceImageBtn.addEventListener("click", () => {
@@ -1254,8 +1129,6 @@
     dom.barcode.addEventListener("input", refreshSearchQuery);
     dom.copyProductBtn.addEventListener("click", () => copyValue(dom.productName.value, dom.copyProductBtn));
     dom.copyBarcodeBtn.addEventListener("click", () => copyValue(onlyDigits(dom.barcode.value), dom.copyBarcodeBtn));
-    dom.productSearchLink.addEventListener("click", persistDraft);
-    dom.barcodeSearchLink.addEventListener("click", persistDraft);
     dom.suggestNameBtn.addEventListener("click", () => startSelection("product"));
   }
 
@@ -1269,7 +1142,6 @@
   };
 
   bindEvents();
-  restoreDraft();
   updateActionState();
 
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {

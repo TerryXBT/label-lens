@@ -10,7 +10,6 @@ LabelLens is a mobile-first PWA for recognizing supermarket price labels. It ext
 - Smear selection for correcting incomplete product names
 - Google Images search links for product names and barcodes
 - Copy buttons for recognized text
-- Local draft restore after returning from search
 - PWA manifest and service worker support
 
 ## Usage

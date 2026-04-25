@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#217a59" />
+    <meta name="theme-color" content="#f5f5f7" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="标签识别" />
     <title>商品标签识别</title>
@@ -23,13 +23,13 @@
         </header>
 
         <section class="panel upload-panel">
-          <div class="drop-zone" id="dropZone">
-            <input id="imageInput" type="file" accept="image/*" />
+          <input class="file-input" id="imageInput" type="file" accept="image/*" />
+          <div class="drop-zone" id="dropZone" role="button" tabindex="0">
             <div class="drop-content">
               <span class="camera-guide" aria-hidden="true"></span>
               <span class="upload-icon" aria-hidden="true">+</span>
-              <strong>拍照 / 上传标签</strong>
-              <span>把黄色或白色标签放进框里</span>
+              <strong>拍照或选择照片</strong>
+              <span>把标签放进框里，保持文字清晰</span>
             </div>
           </div>
 
